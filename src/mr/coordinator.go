@@ -276,11 +276,11 @@ func (c *Coordinator) FetchIntermediate(args *FetchIntermediateArgs, reply *Fetc
 	}
 
 	reduceId := task.ReduceId
-	taskState := c.TaskStates[task.TaskId].ReduceTaskState
+	taskState := &c.TaskStates[task.TaskId].ReduceTaskState
 	// for mapId in taskState.ToFetchIntermediate
 	new_to_fetch_intermediate := []int{}
 	for _, mapId := range taskState.ToFetchIntermediate {
-		if c.MapStates[mapId].FinishedIntermediate[reduceId] == true {
+		if c.MapStates[mapId].FinishedIntermediate[reduceId] {
 			reply.IntermediateFiles = append(reply.IntermediateFiles, mapId)
 		} else {
 			new_to_fetch_intermediate = append(new_to_fetch_intermediate, mapId)
@@ -304,7 +304,7 @@ func (c *Coordinator) FinishIntermediate(args *FinishIntermediateArgs, reply *Fi
 
 	mapId := task.MapId
 	reduceId := args.ReduceId
-	mapTaskState := c.TaskStates[task.TaskId].MapTaskState
+	mapTaskState := &c.TaskStates[task.TaskId].MapTaskState
 	mapTaskState.FinishedIntermediate = append(mapTaskState.FinishedIntermediate, reduceId)
 	c.MapStates[mapId].FinishedIntermediate[reduceId] = true
 
@@ -350,6 +350,8 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 	c.M = len(files)
 	c.R = nReduce
 	c.Finished = false
+
+	log.Printf("MakeCoordinator: M=%v, R=%v\n", c.M, c.R)
 
 	// initialize MapStates: []*AbstractMapTaskState
 	for i := 0; i < c.M; i++ {

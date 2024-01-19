@@ -173,6 +173,8 @@ func do_reduce(workerId int, reply *FetchTaskReply, reducef func(string, []strin
 			}
 			time.Sleep(time.Second)
 			continue
+		} else if len(intermediateFiles) == 0 {
+			time.Sleep(time.Second)
 		}
 		retry = 0
 
@@ -239,11 +241,11 @@ func fetchTask(workerId int, reply *FetchTaskReply) bool {
 	args := FetchTaskArgs{workerId}
 	ok := call("Coordinator.FetchTask", &args, &reply)
 	if ok {
-		log.Printf("fetch task: %v\n", reply)
+		log.Printf("[%v] fetch task: %v\n", workerId, reply)
 		return true
 	} else {
 		// log.Fatal("fetch task failed!")
-		log.Printf("fetch task failed: %v\n", args)
+		log.Printf("[%v] fetch task failed: %v\n", workerId, args)
 		return false
 	}
 }
@@ -253,11 +255,11 @@ func finishIntermediate(workerId int, task Task, reduceId int) bool {
 	reply := FinishIntermediateReply{}
 	ok := call("Coordinator.FinishIntermediate", &args, &reply)
 	if ok {
-		log.Printf("finish intermediate: %v\n", args)
+		log.Printf("[%v] finish intermediate: %v\n", workerId, args)
 		return true
 	} else {
 		// log.Fatal("finish intermediate failed!")
-		log.Printf("finish intermediate failed: %v\n", args)
+		log.Printf("[%v] finish intermediate failed: %v\n", workerId, args)
 		return false
 	}
 }
@@ -267,11 +269,11 @@ func FetchIntermediate(workerId int, task Task) []int {
 	reply := FetchIntermediateReply{}
 	ok := call("Coordinator.FetchIntermediate", &args, &reply)
 	if ok {
-		log.Printf("fetch intermediate: %v %v\n", args, reply)
+		log.Printf("[%v] fetch intermediate: %v %v\n", workerId, args, reply)
 		return reply.IntermediateFiles
 	} else {
 		// log.Fatal("fetch intermediate failed!")
-		log.Printf("fetch intermediate failed: %v\n", args)
+		log.Printf("[%v] fetch intermediate failed: %v\n", workerId, args)
 		return nil
 	}
 }
@@ -281,11 +283,11 @@ func finishTask(workerId int, task Task) bool {
 	reply := FinishTaskReply{}
 	ok := call("Coordinator.FinishTask", &args, &reply)
 	if ok {
-		log.Printf("finish task: %v\n", args)
+		log.Printf("[%v] finish task: %v\n", workerId, args)
 		return true
 	} else {
 		// log.Fatal("finish task failed!")
-		log.Printf("finish task failed: %v\n", args)
+		log.Printf("[%v] finish task failed: %v\n", workerId, args)
 		return false
 	}
 }

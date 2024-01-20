@@ -21,10 +21,10 @@ type ReduceTaskState struct {
 type TaskState struct {
 	Task Task
 
-	WorkerId     int
-	IssueTime    int64
-	LastBeatTime int64
-	Finished     bool
+	WorkerId  int
+	IssueTime int64
+	Aborted   bool
+	Finished  bool
 
 	MapTaskState    MapTaskState
 	ReduceTaskState ReduceTaskState
@@ -110,11 +110,11 @@ func (c *Coordinator) FetchTask(args *FetchTaskArgs, reply *FetchTaskReply) erro
 			ReduceId: -1,
 		}
 		c.TaskStates = append(c.TaskStates, &TaskState{
-			Task:         task,
-			WorkerId:     workerId,
-			IssueTime:    currentTime,
-			LastBeatTime: currentTime,
-			Finished:     false,
+			Task:      task,
+			WorkerId:  workerId,
+			IssueTime: currentTime,
+			Aborted:   false,
+			Finished:  false,
 			MapTaskState: MapTaskState{
 				FinishedIntermediate: []int{},
 			},
@@ -145,11 +145,11 @@ func (c *Coordinator) FetchTask(args *FetchTaskArgs, reply *FetchTaskReply) erro
 			ReduceId: reduceState.ReduceId,
 		}
 		c.TaskStates = append(c.TaskStates, &TaskState{
-			Task:         task,
-			WorkerId:     workerId,
-			IssueTime:    currentTime,
-			LastBeatTime: currentTime,
-			Finished:     false,
+			Task:      task,
+			WorkerId:  workerId,
+			IssueTime: currentTime,
+			Aborted:   false,
+			Finished:  false,
 			ReduceTaskState: ReduceTaskState{
 				ToFetchIntermediate: ToFetchIntermediate,
 			},
@@ -252,15 +252,11 @@ func (c *Coordinator) FinishTask(args *FinishTaskArgs, reply *FinishTaskReply) e
 func (c *Coordinator) Heartbeat(args *HeartbeatArgs, reply *HeartbeatReply) error {
 	c.global_mutex.Lock()
 	defer c.global_mutex.Unlock()
+	log.Printf("[master] Heartbeat: %v\n", args)
 	workerId := args.WorkerId
-	task := args.Task
 	currentTime := time.Now().UnixNano()
 
 	c.WorkerStates[workerId].LastBeatTime = currentTime
-	if c.WorkerStates[workerId].CurrentTask != c.TaskStates[task.TaskId] {
-		panic("worker's current task is not the same as the task in heartbeat")
-	}
-	c.TaskStates[task.TaskId].LastBeatTime = currentTime
 	return nil
 }
 
@@ -288,6 +284,68 @@ func (c *Coordinator) FetchIntermediate(args *FetchIntermediateArgs, reply *Fetc
 	}
 	taskState.ToFetchIntermediate = new_to_fetch_intermediate
 
+	if len(reply.IntermediateFiles) != 0 {
+		reply.AbortCurrentTask = false
+		return nil
+	}
+
+	current_time := time.Now().UnixNano()
+
+	abort_current_task := func() {
+		reply.AbortCurrentTask = true
+		c.TaskStates[task.TaskId].Aborted = true
+		c.WorkerStates[workerId].CurrentTask = nil
+		c.WorkerStates[workerId].CurrentTaskIssueTime = 0
+		c.WorkerStates[workerId].HistoryTasks = append(c.WorkerStates[workerId].HistoryTasks, c.TaskStates[task.TaskId])
+	}
+
+	// check if there is any vacant & alive worker
+	valid_worker_exists := false
+	timeout_sec := 5
+	for _, workerState := range c.WorkerStates {
+		lastBeatTime := workerState.LastBeatTime
+		delta := current_time - lastBeatTime
+		if workerState.CurrentTask == nil && delta < int64(timeout_sec)*int64(time.Second) {
+			valid_worker_exists = true
+			break
+		}
+	}
+	if valid_worker_exists == true {
+		reply.AbortCurrentTask = false
+		return nil
+	}
+
+	// check if there is any map stalled
+	for _, mapState := range c.MapStates {
+		if mapState.Finished {
+			continue
+		}
+
+		if len(mapState.TaskInstances) == 0 {
+			// the map is stalled
+			abort_current_task()
+			return nil
+		}
+
+		lastBeatTime := int64(0)
+		for _, taskInstance := range mapState.TaskInstances {
+			if taskInstance.Aborted {
+				continue
+			}
+			workerState := c.WorkerStates[taskInstance.WorkerId]
+			if workerState.LastBeatTime > lastBeatTime {
+				lastBeatTime = workerState.LastBeatTime
+			}
+		}
+		delta := current_time - lastBeatTime
+		if delta > int64(timeout_sec)*int64(time.Second) {
+			// all workers working on this map are dead
+			abort_current_task()
+			return nil
+		}
+	}
+
+	reply.AbortCurrentTask = false
 	return nil
 }
 

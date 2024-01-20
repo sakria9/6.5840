@@ -67,7 +67,6 @@ type FinishTaskReply struct {
 
 type HeartbeatArgs struct {
 	WorkerId int
-	Task     Task
 }
 type HeartbeatReply struct {
 }
@@ -77,6 +76,7 @@ type FetchIntermediateArgs struct {
 	Task     Task
 }
 type FetchIntermediateReply struct {
+	AbortCurrentTask  bool
 	IntermediateFiles []int
 }
 

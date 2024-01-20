@@ -62,6 +62,14 @@ func Worker(mapf func(string, string) []KeyValue,
 		}
 	}
 
+	beat := func() {
+		for {
+			heartbeat(workerId)
+			time.Sleep(time.Second)
+		}
+	}
+	go beat()
+
 	// 2. fetch task from coordinator
 	for {
 		reply := FetchTaskReply{}
@@ -165,17 +173,21 @@ func do_reduce(workerId int, reply *FetchTaskReply, reducef func(string, []strin
 	reducedCount := 0
 	kv := map[string][]string{}
 	for reducedCount < reply.M {
-		intermediateFiles := FetchIntermediate(workerId, task)
-		if intermediateFiles == nil {
+		fetchIntermediateReply := FetchIntermediateReply{}
+		ok := FetchIntermediate(workerId, task, &fetchIntermediateReply)
+		if !ok {
 			retry++
 			if retry == 10 {
 				panic("fetch intermediate failed!")
 			}
 			time.Sleep(time.Second)
 			continue
-		} else if len(intermediateFiles) == 0 {
+		} else if fetchIntermediateReply.AbortCurrentTask {
+			return
+		} else if len(fetchIntermediateReply.IntermediateFiles) == 0 {
 			time.Sleep(time.Second)
 		}
+		intermediateFiles := fetchIntermediateReply.IntermediateFiles
 		retry = 0
 
 		for _, intermediateFile := range intermediateFiles {
@@ -264,17 +276,16 @@ func finishIntermediate(workerId int, task Task, reduceId int) bool {
 	}
 }
 
-func FetchIntermediate(workerId int, task Task) []int {
+func FetchIntermediate(workerId int, task Task, reply *FetchIntermediateReply) bool {
 	args := FetchIntermediateArgs{workerId, task}
-	reply := FetchIntermediateReply{}
 	ok := call("Coordinator.FetchIntermediate", &args, &reply)
 	if ok {
 		log.Printf("[%v] fetch intermediate: %v %v\n", workerId, args, reply)
-		return reply.IntermediateFiles
+		return true
 	} else {
 		// log.Fatal("fetch intermediate failed!")
 		log.Printf("[%v] fetch intermediate failed: %v\n", workerId, args)
-		return nil
+		return false
 	}
 }
 
@@ -288,6 +299,20 @@ func finishTask(workerId int, task Task) bool {
 	} else {
 		// log.Fatal("finish task failed!")
 		log.Printf("[%v] finish task failed: %v\n", workerId, args)
+		return false
+	}
+}
+
+func heartbeat(workerId int) bool {
+	args := HeartbeatArgs{workerId}
+	reply := HeartbeatReply{}
+	ok := call("Coordinator.Heartbeat", &args, &reply)
+	if ok {
+		log.Printf("[%v] heartbeat: %v\n", workerId, args)
+		return true
+	} else {
+		// log.Fatal("heartbeat failed!")
+		log.Printf("[%v] heartbeat failed: %v\n", workerId, args)
 		return false
 	}
 }
